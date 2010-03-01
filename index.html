@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html>
+<head> 
+    <meta http-equiv="content-type" content="text/html; charset=utf-8" /> 
+    <title>Canvas Reaction</title>
+    <script type="text/javascript" src="js/mootools-1.2.4-core.js"></script>
+    <script type="text/javascript">
+	//<![CDATA[
+	
+		/*
+		 * Ball
+		 */
+		var Ball = new Class({
+			
+			STATE_MOVING:				1,
+			STATE_COLLIDED: 			2,
+			STATE_COLLIDED_EXPANDING:	3,
+			STATE_COLLIDED_SHRINKING:	4,
+			
+			// in game ticks - 1 tick = (1/30th second)
+			COLLIDED_LIFETIME:			35,		
+			
+			x: null,
+			y: null,
+			
+			dx: null,
+			dy: null,
+			
+			colour: null,
+			radius: null,
+			lifetime: null,
+			generation: null,
+			score: null,
+			state: null,
+			
+			audio: null,
+			
+			
+			// creates a new randomly positioned/coloured ball
+			initialize: function(radius, screenWidth, screenHeight) {
+			
+				this.x = $random(radius, screenWidth - radius);
+				this.y = $random(radius, screenHeight - radius);
+				this.dx = ($random(12,20) / 10) * ($random(0,1) ? 1 : -1);
+				this.dy = ($random(12,20)/ 10) * ($random(0,1) ? 1 : -1);
+				this.colour = ('rgb(' + $random(0,255) + ',' + $random(0,255) + ',' + $random(0,255) + ')').rgbToHex();
+				this.radius = radius;
+				this.lifetime = this.COLLIDED_LIFETIME;
+				this.generation = 0;
+				this.state = this.STATE_MOVING;
+				
+				// collision sound for supported browsers only
+				if(Audio) {
+					this.audio = new Audio('sfx/collide.ogg');
+				}
+			},
+			
+			// plays the collision sound if supported by the browser
+			playSound: function() {
+				
+				if(this.audio) {
+					this.audio.play();
+				}
+			}
+		});
+		
+		/**
+		 * Game
+		 */
+		var Game = new Class({
+			
+			BALL_RADIUS: 5,
+			BALL_RADIUS_COLLIDED: 40,
+			
+			loopIntervalRef: null,
+			
+			// rendering
+			canvasScreen: null,
+			canvasBuffer: null,
+			canvasCtxScreen: null,
+			canvasCtxBuffer: null,
+			
+			// game
+			isReacting: false,		 // true once the player has placed their ball
+			screenWidth: 0,
+			screenHeight: 0,
+			
+			aBalls: [],
+			aCollided: [],
+			
+			score: 0,
+			
+			numAcquired: 0,
+			numRequired: 0,
+			isGameOver: false,
+			
+			initialize: function(screenID, bufferID, screenWidth, screenHeight, numBalls, numRequired) {
+				
+				this.screenWidth = screenWidth;
+				this.screenHeight = screenHeight;
+				this.numRequired = numRequired;
+				
+				// reset
+				this.numAcquired = 0;
+				this.isGameOver =  false;
+				this.aBalls = [];
+				this.aCollided = [];
+				
+				// setup canvas / double-buffering
+				this.canvasScreen = $(screenID);
+				this.canvasBuffer = $(bufferID);
+				this.canvasCtxScreen = this.canvasScreen.getContext('2d');
+				this.canvasCtxBuffer = this.canvasBuffer.getContext('2d');
+				
+				// listen to clicks on the game area
+				this.canvasScreen.addEvent('click', this._eventClick.bindWithEvent(this));
+				
+				// create balls
+				for(var i = 0; i < numBalls; i++) {
+					this.aBalls.push(new Ball(this.BALL_RADIUS, screenWidth, screenHeight));
+				}
+				
+				// begin (30 fps)
+				this.loopIntervalRef = this.loop.periodical(1000 / 30, this);
+			},
+			
+			loop: function() {
+				
+				var bufferCtx = this.canvasCtxBuffer;
+				var aBalls = this.aBalls;
+				var aCollided = this.aCollided;
+				var screenWidth = this.screenWidth;
+				var screenHeight = this.screenHeight;
+				
+				// blur effect for game over
+				if(this.isGameOver) {
+					bufferCtx.globalAlpha = 0.1;
+				}
+				
+				// clear buffer
+				bufferCtx.fillStyle = '#222222';
+				bufferCtx.fillRect(0, 0, screenWidth, screenHeight);
+				
+				// blur effect for game over
+				if(this.isGameOver) {
+					bufferCtx.globalAlpha = 0.3;
+				}
+				// nice blending for collided balls
+				bufferCtx.globalCompositeOperation = 'lighter';
+				
+				// process each ball, performing movement and checking for collisions	
+				for(var i = 0, ilen = aBalls.length; i < ilen; i++) {
+					
+					var oBall = aBalls[i];
+					
+					// state: Moving
+					// Ball is bouncing around happily doing it's thang'
+					if(oBall.state == oBall.STATE_MOVING) {
+					
+						// check for collision with each ball in the collided list
+						for(var j = 0, jlen = aCollided.length; j < jlen; j++) {
+							
+							var oStatic = aCollided[j];
+							
+							// check for dead balls in the collided list
+							if(oStatic.state == oStatic.STATE_COLLIDED_SHRINKING && oStatic.radius <= 3) {
+								aCollided.splice(j, 1);
+								j--;
+								jlen--;
+							}
+				
+							var  a = oBall.radius + oStatic.radius;
+							a = a * a;
+							
+							var dx = oBall.x - oStatic.x;
+							var dy = oBall.y - oStatic.y;
+							
+							if(a > (dx * dx) + (dy * dy)) {
+								
+								// ball has collided - update its state and add to the collided list
+								oBall.state = oBall.STATE_COLLIDED_EXPANDING;
+								aCollided.push(oBall);
+								
+								// distance from original source explosion (for points calc)
+								oBall.generation = oStatic.generation + 1;
+								oBall.score = (oBall.generation * oBall.generation * oBall.generation) * 100;
+								
+								// update game wide score
+								this.score += oBall.score;
+								this.numAcquired++;
+								
+								// remove score flag from hit ball (we only show scores for the leaf balls)
+								oStatic.score = null;
+								
+								// play the collision sound effect specific to this ball (all the same at the moment)
+								oBall.playSound();
+								
+								break;
+							}
+						}
+					
+						// is this ball still moving after the collision detection?
+						if(oBall.state == oBall.STATE_MOVING) {
+						
+							// update the balls position
+							if((oBall.x + oBall.dx + oBall.radius) > screenWidth || (oBall.x + oBall.dx - oBall.radius) < 0) {
+								oBall.dx = -oBall.dx;
+							}
+							
+							if((oBall.y + oBall.dy + oBall.radius) > screenHeight || (oBall.y + oBall.dy - oBall.radius) < 0) {
+								oBall.dy = -oBall.dy;
+							}
+							
+						
+							oBall.x += oBall.dx;
+							oBall.y += oBall.dy;
+						}
+					}
+					
+					// state: Collided
+					// Ball is collided and sat in its largest size just waiting...
+					else if(oBall.state == oBall.STATE_COLLIDED) {
+						
+						// decrement time until this ball starts to disappear (measured in terms of frame ticks)
+						oBall.lifetime--;
+						
+						if(oBall.lifetime <= 0) {
+							oBall.state = oBall.STATE_COLLIDED_SHRINKING;
+						}
+					}
+					
+					// state: Collided (shrinking)
+					// Ball has begun its decline into oblivion
+					else if(oBall.state == oBall.STATE_COLLIDED_SHRINKING) {
+						
+						oBall.radius -= 5;
+						
+						// check for ball's death and remove from the list
+						if(oBall.radius <= 0) {
+							aBalls.splice(i, 1);
+							i--;
+							ilen--;
+						}
+					}
+					
+					// state: Collided (expanding)
+					// Ball has collided and is still expanding to its supernova glory
+					else if(oBall.state == oBall.STATE_COLLIDED_EXPANDING) {
+						
+						var maxRadius = this.BALL_RADIUS_COLLIDED;
+						
+						// continue expanding?
+						if(oBall.radius < maxRadius) {
+							oBall.radius += 2;
+					
+							if(oBall.radius > maxRadius) {
+								oBall.radius = maxRadius;
+							}
+						}
+						
+						// finished expanding
+						else {
+							oBall.state = oBall.STATE_COLLIDED;
+						}
+					}
+				}
+				
+				// render each ball
+				this.renderBalls();
+				
+				// check for game over
+				if(this.isGameOver || this.isReacting && this.aCollided.length == 0) {
+					
+					this.isGameOver = true;
+					this.renderEnd();
+				}
+				else {
+				
+					// we've rendered all the balls in whatever state they're in so
+					// now it's time to render any collided scores we need to
+					this.renderScores();
+				}
+				
+				// draw the offscreen buffer to the screen
+				this.canvasCtxScreen.drawImage(this.canvasBuffer, 0, 0);
+			},
+			
+			renderBalls: function() {
+				
+				var aBalls = this.aBalls;
+				var ctx = this.canvasCtxBuffer;
+				
+				for(var i = 0, ilen = aBalls.length; i < ilen; i++) {
+					
+					var oBall = aBalls[i];
+					
+					ctx.fillStyle = oBall.colour;
+					ctx.beginPath();
+					ctx.arc(oBall.x, oBall.y, oBall.radius, 0, Math.PI * 2, true);
+					ctx.closePath();
+					ctx.fill();
+				}
+			},
+			
+			renderScores: function() {
+				
+				var ctx = this.canvasCtxBuffer;
+				var aCollided = this.aCollided;
+				
+				// score text styles (turn off blending too)
+				ctx.globalCompositeOperation = 'source-over';
+				ctx.fillStyle = '#ffffff';
+				ctx.textAlign = 'center';
+				ctx.font = 'bold 10px sans-serif';
+				ctx.textBaseline = 'middle';
+				
+				// dtaw any collided ball scores - but only leaf balls (e.g.
+				// only the outer most balls in a collision)
+				for(var i = 0, ilen = aCollided.length; i < ilen; i++) {
+					
+					var oBall = aCollided[i];
+					
+					if(oBall.generation > 0 && oBall.score) {
+						
+						ctx.fillText('+' + this._numberFormat(oBall.score), oBall.x, oBall.y);
+					}
+				}
+				
+				// calculate number left to acquire
+				var ballsLeft = this.numRequired - this.numAcquired;
+				
+				// render total scores (add drop shadows to these so they're
+				// always visible)
+				ctx.save();
+				
+				ctx.font = 'bold 20px sans-serif';
+				ctx.textAlign = 'end';
+				ctx.textBaseline = 'bottom';
+				ctx.shadowOffsetX = 1;
+				ctx.shadowOffsetY = 1;
+				ctx.shadowBlur    = 4;
+				ctx.shadowColor   = '#000000';
+                
+				ctx.fillText(this._numberFormat(this.score), this.screenWidth - 15, this.screenHeight - 15);
+                
+				ctx.textAlign = 'start';
+				ctx.textBaseline = 'top';
+				ctx.fillText('Annihilate ' + (ballsLeft < 0 ? 0 : ballsLeft) + ' more stinkin\' circles', 15, 15);
+				
+				ctx.restore();
+			},
+			
+			renderEnd: function() {
+			
+				var bufferCtx = this.canvasCtxBuffer;
+				
+				bufferCtx.globalCompositeOperation = 'source-over';
+				
+				// transparent overlay
+				bufferCtx.globalAlpha = 0.1;
+				bufferCtx.fillStyle = '#000000';
+				bufferCtx.fillRect(0, 0, this.screenWidth, this.screenHeight);
+
+				// calculate scores
+				var success = (this.numRequired - this.numAcquired) <= 0;
+				var messageA = messageB = messageC = messageD = '';
+				
+				if(success) {
+					messageA = 'Congratulations! You showed \'em!';
+					messageB = 'You annihilated ' + this.numAcquired + ' of the suckers';
+					messageD = 'Not so smug now, are they?';
+				}
+				else {
+					messageA = 'Fail';
+					messageB = 'You needed ' + (this.numRequired - this.numAcquired) + ' more to win';
+					messageD = 'Look at those cirlces. They\'re laughing at you';
+				}
+				
+				messageC = 'Score: ' + this._numberFormat(this.score);
+				
+				// game outcome
+				bufferCtx.globalAlpha = 1;
+				bufferCtx.font = 'bold 30px sans-serif';
+				bufferCtx.textAlign = 'center';
+				bufferCtx.textBaseline = 'bottom';
+				bufferCtx.fillStyle = '#ffffff';
+				bufferCtx.fillText(messageA, this.screenWidth / 2, 125);
+				
+				bufferCtx.font = 'bold 20px sans-serif';
+				bufferCtx.fillText(messageB, this.screenWidth / 2, 174);
+				
+				bufferCtx.fillStyle = '#bbbbbb';
+				bufferCtx.fillText(messageC, this.screenWidth / 2, 300);
+			},
+			
+			
+			_eventClick: function(oEvent) {
+				
+				if(this.isReacting == false) {
+					
+					var oBall = new Ball(1, this.screenWidth, this.screenHeight);
+					
+					// get coords relative to the screen area
+					var oCoords = this.canvasScreen.getCoordinates();
+					
+					oBall.x = oEvent.page.x - oCoords.left;
+					oBall.y = oEvent.page.y - oCoords.top;
+					
+					oBall.colour = '#aaaaaa';
+					oBall.state = oBall.STATE_COLLIDED_EXPANDING;
+					
+					// add to balls and collided lists
+					this.aBalls.push(oBall);
+					this.aCollided.push(oBall);
+					
+					// flag that we've started the reaction
+					this.isReacting = true;
+				}
+				else if(this.isGameOver) {
+					window.location.reload();
+				}
+			},
+			
+			_numberFormat: function(n) {
+				
+				n += '';
+				x = n.split('.');
+				x1 = x[0];
+				x2 = x.length > 1 ? '.' + x[1] : '';
+				var rgx = /(\d+)(\d{3})/;
+				while (rgx.test(x1)) {
+					x1 = x1.replace(rgx, '$1' + ',' + '$2');
+				}
+				return x1 + x2;
+			}
+		});
+		
+		window.addEvent('domready', function() {
+			
+			new Game('screen', 'buffer', 620, 400, 60, 54);
+		});
+
+	//]]>
+    </script>
+	
+	<style type="text/css">
+	
+		body {
+			background: #111;
+			text-align: center;
+			font-family: Arial;
+			font-weight: bold;
+			color: #fff;
+		}
+		
+		h1 {
+			margin: 1em 0 0 0;
+		}
+		
+		p {
+			color: #aaa;
+			margin: 0 0 4em 0;
+		}
+		
+		#buffer {
+			display: none;
+		}
+		
+	</style>
+</head>
+<body>
+	<h1>Canvas Reaction</h1>
+	<p>Click game area to start a reaction</p>
+    <canvas id="screen" width="620" height="400"></canvas>
+	<canvas id="buffer" width="620" height="400"></canvas>
+</body>
+</html>
