@@ -1,0 +1,71 @@
+:root {
+  color: #f7f7f2;
+  background: #111111;
+  font-family: Arial, Helvetica, sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+  background:
+    radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.1), transparent 28rem),
+    #111111;
+}
+
+.game-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  align-content: center;
+  gap: 2.5rem;
+  padding: 2rem 1rem;
+}
+
+.game-header {
+  display: grid;
+  gap: 0.55rem;
+  text-align: center;
+}
+
+.game-header h1 {
+  margin: 0;
+  font-size: clamp(2rem, 8vw, 4.5rem);
+  line-height: 0.95;
+}
+
+.game-header p {
+  margin: 0;
+  color: #aaaaaa;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.game-screen {
+  width: min(620px, calc(100vw - 2rem));
+  height: auto;
+  aspect-ratio: 31 / 20;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #222222;
+  box-shadow: 0 1.5rem 4rem rgba(0, 0, 0, 0.45);
+  cursor: crosshair;
+}
+
+@media (max-height: 620px) {
+  .game-shell {
+    gap: 1.25rem;
+    padding-block: 1rem;
+  }
+
+  .game-header h1 {
+    font-size: 2rem;
+  }
+}
